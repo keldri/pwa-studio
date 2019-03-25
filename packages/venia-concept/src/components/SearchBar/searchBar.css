@@ -27,7 +27,7 @@
     width: 100%;
 }
 
-.SearchAutocompleteWrapper {
+.autocomplete {
     text-align: left;
     margin: -0.5rem 0 0.5rem;
     position: absolute;

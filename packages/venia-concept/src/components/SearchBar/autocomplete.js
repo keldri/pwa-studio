@@ -83,6 +83,7 @@ class SearchAutocomplete extends Component {
         const { classes, autocompleteVisible } = this.props;
         const { handleOnProductOpen, handleCategorySearch } = this;
         const { autocompleteQuery, isQueryUpdating } = this.state;
+        console.log({ autocompleteVisible, autocompleteQuery })
 
         if (!autocompleteVisible || autocompleteQuery.length < 3) return null;
 

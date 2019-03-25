@@ -1,173 +1,160 @@
-import React, { Component } from 'react';
-import { Form } from 'informed';
-import { bool, func, object, shape, string } from 'prop-types';
-import getQueryParameterValue from '../../util/getQueryParameterValue';
-import { SEARCH_QUERY_PARAMETER } from '../../RootComponents/Search/consts';
-import SearchAutocomplete from './autocomplete';
-import Icon from 'src/components/Icon';
-import ClearIcon from 'react-feather/dist/icons/x';
-import SearchIcon from 'react-feather/dist/icons/search';
-import TextInput from 'src/components/TextInput';
-import Trigger from 'src/components/Trigger';
+import React, { useCallback, useEffect, useRef, useState } from "react"
+import { Form } from "informed"
+import ClearIcon from "react-feather/dist/icons/x"
+import SearchIcon from "react-feather/dist/icons/search"
 
-import classify from 'src/classify';
-import defaultClasses from './searchBar.css';
+import { mergeClasses } from "src/classify"
+import Icon from "src/components/Icon"
+import TextInput from "src/components/TextInput"
+import Trigger from "src/components/Trigger"
+import getQueryParameterValue from "src/util/getQueryParameterValue"
+import SearchAutocomplete from "./autocomplete"
+import defaultClasses from "./searchBar.css"
 
-const initialValues = {
-    search_query: ''
-};
+const clearIcon = <Icon src={ClearIcon} size={18} />
+const searchIcon = <Icon src={SearchIcon} size={18} />
 
-const clearIcon = <Icon src={ClearIcon} size={18} />;
-const searchIcon = <Icon src={SearchIcon} size={18} />;
+const initialValues = { search_query: "" }
 
-// TODO: remove export here (update story and test)
-export class SearchBar extends Component {
-    static propTypes = {
-        classes: shape({
-            clearIcon: string,
-            clearIcon_off: string,
-            root: string,
-            searchBlock: string,
-            searchBlockOpen: string,
-            searchBar: string,
-            searchIcon: string
-        }),
-        executeSearch: func.isRequired,
-        history: object,
-        isOpen: bool,
-        location: object,
-        match: object
-    };
+const SearchBar = props => {
+    const { executeSearch, history, isOpen, location } = props
+    const formApi = useRef(null)
+    const searchRef = useRef(null)
+    const [dirty, setDirty] = useState(false)
+    const [expanded, setExpanded] = useState(false)
+    const classes = mergeClasses(defaultClasses, props.classes)
+    const className = isOpen ? classes.root_open : classes.root
+    console.log({ expanded })
 
-    constructor(props) {
-        super(props);
-        this.searchRef = React.createRef();
-        this.autocompleteRef = React.createRef();
-        this.state = {
-            dirty: false,
-            autocompleteVisible: false
-        };
-    }
+    const searchQuery = formApi.current
+        ? formApi.current.getValue("search_query") || ""
+        : ""
 
-    componentWillUnmount = () => {
-        document.removeEventListener(
-            'mousedown',
-            this.autocompleteClick,
-            false
-        );
-    };
+    // after mount: add listener to collapse autocomplete
+    // after unmount: remove listener
+    useEffect(
+        () => {
+            const collapse = ({ target }) => {
+                if (!searchRef.current.contains(target)) {
+                    setExpanded(false)
+                }
+            }
 
-    componentDidMount() {
-        const searchValueFromQueryString = getQueryParameterValue({
-            location: this.props.location,
-            queryParameter: SEARCH_QUERY_PARAMETER
-        });
+            document.addEventListener("mousedown", collapse)
 
-        document.addEventListener('mousedown', this.autocompleteClick, false);
-        this.formApi.setValue('search_query', searchValueFromQueryString);
-    }
+            // return a callback, which is called on unmount
+            return () => {
+                document.removeEventListener("mousedown", collapse)
+            }
+        },
+        [setExpanded]
+    )
 
-    componentDidUpdate(prevProps) {
-        if (this.props.isOpen !== prevProps.isOpen) {
-            this.searchRef.current.querySelector('input').focus();
-        }
-    }
+    // update search field when location changes
+    useEffect(
+        () => {
+            const searchParam = getQueryParameterValue({
+                location,
+                queryParameter: "query"
+            })
 
-    autocompleteClick = e => {
-        if (
-            this.searchRef.current.contains(e.target) ||
-            this.autocompleteRef.current.contains(e.target)
-        )
-            return;
-        this.updateAutocompleteVisible(false);
-    };
+            if (formApi.current && searchParam) {
+                formApi.current.setValue("search_query", searchParam)
+            }
+        },
+        [formApi, location]
+    )
 
-    inputFocus = () => {
-        this.updateAutocompleteVisible(true);
-    };
+    // set dirty state on form change
+    const handleFormChange = useCallback(
+        ({ values }) => {
+            console.log("form change")
+            setDirty(!!values.search_query)
+        },
+        [setDirty]
+    )
 
-    get resetButton() {
-        const { resetForm, state } = this;
+    // perform search on form submit
+    const handleFormSubmit = useCallback(
+        ({ search_query }) => {
+            console.log("form submit", { search_query })
+            executeSearch(search_query, history)
+            setExpanded(false)
+        },
+        [executeSearch, history, setExpanded]
+    )
 
-        return state.dirty && <Trigger action={resetForm}>{clearIcon}</Trigger>;
-    }
+    // expand autocomplete on input change
+    const handleInputChange = useCallback(
+        value => {
+            console.log("input change", { value })
+            setExpanded(true)
+        },
+        [setExpanded]
+    )
 
-    updateAutocompleteVisible = visible => {
-        this.setState({
-            autocompleteVisible: visible
-        });
-    };
+    // expand autocomplete on input focus
+    const handleInputFocus = useCallback(
+        () => {
+            console.log("input focus")
+            setExpanded(true)
+        },
+        [setExpanded]
+    )
 
-    handleChange = ({ values }) => {
-        const dirty = !!values.search_query;
-        dirty !== this.state.dirty && this.setState({ dirty });
-    };
+    // save form api as a ref
+    const saveFormApi = useCallback(
+        api => {
+            formApi.current = api
+        },
+        []
+    )
 
-    handleInputChange = () => this.updateAutocompleteVisible(true);
+    // reset form state
+    const resetForm = useCallback(
+        () => {
+            console.log("reset form")
+            setExpanded(false)
+            formApi.current.reset()
+        },
+        [setExpanded]
+    )
 
-    handleSubmit = ({ search_query }) => {
-        if (search_query) {
-            this.props.executeSearch(search_query, this.props.history);
-            this.updateAutocompleteVisible(false);
-        }
-    };
+    const resetButton = dirty
+        ? <Trigger action={resetForm}>{clearIcon}</Trigger>
+        : null
 
-    resetForm = () => {
-        this.updateAutocompleteVisible(false);
-        this.formApi.reset();
-    };
-
-    setApi = formApi => {
-        this.formApi = formApi;
-    };
-
-    render() {
-        const { props, resetButton, formApi } = this;
-        const { autocompleteVisible } = this.state;
-        const { classes, isOpen } = props;
-        const className = isOpen ? classes.root_open : classes.root;
-
-        const { values } = (formApi && formApi.getState()) || {};
-        const searchQuery = (values && values.search_query) || '';
-
-        return (
-            <div className={className}>
-                <div className={classes.searchInner} ref={this.searchRef}>
-                    <Form
-                        className={classes.form}
-                        getApi={this.setApi}
-                        autoComplete="off"
-                        initialValues={initialValues}
-                        onChange={this.handleChange}
-                        onSubmit={this.handleSubmit}
-                    >
-                        <TextInput
-                            field="search_query"
-                            onFocus={this.inputFocus}
-                            onChange={this.handleInputChange}
-                            after={resetButton}
-                            before={searchIcon}
+    return (
+        <div className={className}>
+            <div ref={searchRef} className={classes.searchInner}>
+                <Form
+                    autoComplete="off"
+                    className={classes.form}
+                    getApi={saveFormApi}
+                    initialValues={initialValues}
+                    onChange={handleFormChange}
+                    onSubmit={handleFormSubmit}
+                >
+                    <TextInput
+                        after={resetButton}
+                        before={searchIcon}
+                        field="search_query"
+                        onValueChange={handleInputChange}
+                        onFocus={handleInputFocus}
+                    />
+                    <div className={classes.autocomplete}>
+                        <SearchAutocomplete
+                            autocompleteVisible={expanded}
+                            executeSearch={executeSearch}
+                            history={history}
+                            searchQuery={searchQuery}
+                            updateAutocompleteVisible={setExpanded}
                         />
-
-                        <div
-                            className={classes.SearchAutocompleteWrapper}
-                            ref={this.autocompleteRef}
-                        >
-                            <SearchAutocomplete
-                                searchQuery={searchQuery}
-                                updateAutocompleteVisible={
-                                    this.updateAutocompleteVisible
-                                }
-                                autocompleteVisible={autocompleteVisible}
-                                executeSearch={this.props.executeSearch}
-                                history={this.props.history}
-                            />
-                        </div>
-                    </Form>
-                </div>
+                    </div>
+                </Form>
             </div>
-        );
-    }
+        </div>
+    )
 }
 
-export default classify(defaultClasses)(SearchBar);
+export default SearchBar
