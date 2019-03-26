@@ -1,155 +1,148 @@
-import React, { Component } from 'react';
-import PropTypes from 'prop-types';
-import debounce from 'lodash.debounce';
-import { Query } from 'src/drivers';
+import React, { useCallback, useContext, useEffect, useState } from "react"
+import debounce from "lodash.debounce"
+import { useFieldState } from "informed"
+import { ApolloContext } from "react-apollo/ApolloContext"
 
-import classify from 'src/classify';
-import { loadingIndicator } from 'src/components/LoadingIndicator';
-import SuggestedCategories from './suggestedCategories';
-import SuggestedProducts from './suggestedProducts';
-import PRODUCT_SEARCH from '../../queries/productSearch.graphql';
+import PRODUCT_SEARCH from "src/queries/productSearch.graphql"
+import SuggestedCategories from "./suggestedCategories"
+import SuggestedProducts from "./suggestedProducts"
 
-import defaultClasses from './autocomplete.css';
+const debounceTimeout = 200
+const suggestedCategoriesLimit = 4
+const suggestedProductsLimit = 3
 
-const debounceTimeout = 200;
-const suggestedCategoriesLimit = 4;
-const suggestedProductsLimit = 3;
+const useQueryResultState = () => {
+    const [data, setData] = useState(null)
+    const [error, setError] = useState(null)
+    const [loading, setLoading] = useState(false)
 
-class SearchAutocomplete extends Component {
-    static propTypes = {
-        classes: PropTypes.shape({
-            root: PropTypes.string,
-            statusContent: PropTypes.string
-        }),
-        searchQuery: PropTypes.string.isRequired,
-        autocompleteVisible: PropTypes.bool,
-        executeSearch: PropTypes.func.isRequired,
-        updateAutocompleteVisible: PropTypes.func.isRequired
-    };
-
-    constructor(props) {
-        super(props);
-        this.state = {
-            isQueryUpdating: false,
-            autocompleteQuery: props.searchQuery || ''
-        };
-    }
-
-    componentDidUpdate = prevProps => {
-        const { searchQuery } = this.props;
-
-        if (prevProps.searchQuery !== searchQuery) {
-            this.setState({ isQueryUpdating: true });
-            this.updateAutocompleteQuery(searchQuery);
-        }
-    };
-
-    /* Debounce this update in order to avoid multiple autocomplete query calls */
-    updateAutocompleteQuery = debounce(value => {
-        this.setState({
-            autocompleteQuery: value,
-            isQueryUpdating: false
-        });
-    }, debounceTimeout);
-
-    handleCategorySearch = event => {
-        event.preventDefault();
-        const { id } = event.currentTarget.dataset || event.srcElement.dataset;
-        this.props.updateAutocompleteVisible(false);
-        this.props.executeSearch(
-            this.state.autocompleteQuery,
-            this.props.history,
-            id
-        );
-    };
-
-    handleOnProductOpen = () => this.props.updateAutocompleteVisible(false);
-
-    // map Magento 2.3.1 schema changes to Venia 2.0.0 proptype shape to maintain backwards compatibility
-    mapProducts(products) {
-        return products.map(product => {
-            const { small_image } = product;
-            return {
-                ...product,
-                small_image:
-                    typeof small_image === 'object'
-                        ? small_image.url
-                        : small_image
-            };
-        });
-    }
-
-    render() {
-        const { classes, autocompleteVisible } = this.props;
-        const { handleOnProductOpen, handleCategorySearch } = this;
-        const { autocompleteQuery, isQueryUpdating } = this.state;
-        console.log({ autocompleteVisible, autocompleteQuery })
-
-        if (!autocompleteVisible || autocompleteQuery.length < 3) return null;
-
-        return (
-            <Query
-                query={PRODUCT_SEARCH}
-                variables={{
-                    inputText: autocompleteQuery
-                }}
-            >
-                {({ loading, error, data }) => {
-                    if (error)
-                        return (
-                            <div className={classes.root}>
-                                <div className={classes.statusContent}>
-                                    Data Fetch Error
-                                </div>
-                            </div>
-                        );
-                    if (loading || isQueryUpdating)
-                        return (
-                            <div className={classes.root}>
-                                <div className={classes.statusContent}>
-                                    {loadingIndicator}
-                                </div>
-                            </div>
-                        );
-
-                    const { filters, items } = data.products;
-
-                    if (items.length <= 0)
-                        return (
-                            <div className={classes.root}>
-                                <div className={classes.statusContent}>
-                                    No results found, try a different search
-                                </div>
-                            </div>
-                        );
-
-                    const categoryFilter = filters.find(
-                        filter => filter.name === 'Category'
-                    );
-
-                    const categorySuggestions = categoryFilter[
-                        'filter_items'
-                    ].slice(0, suggestedCategoriesLimit);
-
-                    return (
-                        <div className={classes.root}>
-                            <SuggestedCategories
-                                handleCategorySearch={handleCategorySearch}
-                                autocompleteQuery={autocompleteQuery}
-                                categorySuggestions={categorySuggestions}
-                            />
-                            <SuggestedProducts
-                                handleOnProductOpen={handleOnProductOpen}
-                                items={this.mapProducts(
-                                    items.slice(0, suggestedProductsLimit)
-                                )}
-                            />
-                        </div>
-                    );
-                }}
-            </Query>
-        );
-    }
+    return { data, error, loading, setData, setError, setLoading }
 }
 
-export default classify(defaultClasses)(SearchAutocomplete);
+// map Magento 2.3.1 schema changes to Venia 2.0.0 proptype shape to maintain backwards compatibility
+const mapProducts = products => products.map(product => {
+    const { small_image } = product;
+
+    return {
+        ...product,
+        small_image:
+            typeof small_image === "object"
+                ? small_image.url
+                : small_image
+    }
+})
+
+const Suggestions = props => {
+    const { executeSearch, history, setVisible, value } = props
+    const client = useContext(ApolloContext)
+    const { data, loading, setData, setLoading } = useQueryResultState()
+
+    const runQuery = useCallback(
+        debounce(inputText => {
+            client
+                .query({
+                    query: PRODUCT_SEARCH,
+                    variables: { inputText },
+                })
+                .then(({ data }) => {
+                    setData(data)
+                    setLoading(false)
+                })
+        }, debounceTimeout),
+        [setData, setLoading]
+    )
+
+    const handleCategorySearch = useCallback(
+        event => {
+            event.preventDefault()
+            const { id } = event.currentTarget.dataset || event.srcElement.dataset
+
+            setVisible(false)
+            executeSearch(
+                value,
+                history,
+                id
+            );
+        },
+        [executeSearch, history, setVisible, value]
+    )
+
+    const handleOnProductOpen = useCallback(
+        () => {
+            setVisible(false)
+        },
+        [setVisible]
+    )
+
+    useEffect(() => {
+        setLoading(true)
+        runQuery(value)
+
+        return runQuery.cancel
+    }, [value])
+
+    if (loading) {
+        return (
+            <div>
+                <div>
+                    {"loading"}
+                </div>
+            </div>
+        )
+    }
+
+    if (!data || !data.products.items.length) {
+        return (
+            <div>
+                <div>
+                    No results found, try a different search
+                </div>
+            </div>
+        )
+    }
+
+    const { filters, items } = data.products
+    const categoryFilter = filters.find(
+        filter => filter.name === 'Category'
+    )
+    const categorySuggestions = categoryFilter[
+        'filter_items'
+    ].slice(0, suggestedCategoriesLimit)
+
+    return (
+        <div>
+            <SuggestedCategories
+                handleCategorySearch={handleCategorySearch}
+                autocompleteQuery={value}
+                categorySuggestions={categorySuggestions}
+            />
+            <SuggestedProducts
+                handleOnProductOpen={handleOnProductOpen}
+                items={mapProducts(
+                    items.slice(0, suggestedProductsLimit)
+                )}
+            />
+        </div>
+    )
+}
+
+const Autocomplete = props => {
+    const { executeSearch, history, setVisible, visible } = props
+    const { value } = useFieldState("search_query")
+    const valid = value && value.length > 2
+
+    if (!visible || !valid) {
+        return null
+    }
+
+    return (
+        <Suggestions
+            executeSearch={executeSearch}
+            history={history}
+            setVisible={setVisible}
+            value={value}
+        />
+    )
+}
+
+export default Autocomplete
