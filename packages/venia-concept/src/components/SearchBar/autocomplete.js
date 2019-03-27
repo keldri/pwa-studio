@@ -3,13 +3,12 @@ import debounce from "lodash.debounce"
 import { useFieldState } from "informed"
 import { ApolloContext } from "react-apollo/ApolloContext"
 
+import { mergeClasses } from "src/classify"
 import PRODUCT_SEARCH from "src/queries/productSearch.graphql"
-import SuggestedCategories from "./suggestedCategories"
-import SuggestedProducts from "./suggestedProducts"
+import Suggestions from "./suggestions"
+import defaultClasses from "./autocomplete.css"
 
 const debounceTimeout = 200
-const suggestedCategoriesLimit = 4
-const suggestedProductsLimit = 3
 
 const useQueryResultState = () => {
     const [data, setData] = useState(null)
@@ -19,23 +18,25 @@ const useQueryResultState = () => {
     return { data, error, loading, setData, setError, setLoading }
 }
 
-// map Magento 2.3.1 schema changes to Venia 2.0.0 proptype shape to maintain backwards compatibility
-const mapProducts = products => products.map(product => {
-    const { small_image } = product;
+const Autocomplete = props => {
+    const { visible } = props
+    const { data, error, loading, setData, setError, setLoading } = useQueryResultState()
 
-    return {
-        ...product,
-        small_image:
-            typeof small_image === "object"
-                ? small_image.url
-                : small_image
-    }
-})
-
-const Suggestions = props => {
-    const { executeSearch, history, setVisible, value } = props
     const client = useContext(ApolloContext)
-    const { data, loading, setData, setLoading } = useQueryResultState()
+    const { value } = useFieldState("search_query")
+    const classes = mergeClasses(defaultClasses, props.classes)
+    const valid = value && value.length > 2
+    let message = ""
+
+    if (error) {
+        message = "An error occurred while fetching results."
+    } else if (loading) {
+        message = "Fetching results..."
+    } else if (!data) {
+        message = "Search for a product"
+    } else if (!data.products.items.length) {
+        message = "No results were found."
+    }
 
     const runQuery = useCallback(
         debounce(inputText => {
@@ -44,104 +45,42 @@ const Suggestions = props => {
                     query: PRODUCT_SEARCH,
                     variables: { inputText },
                 })
-                .then(({ data }) => {
+                .then(({ data, error }) => {
                     setData(data)
+                    setError(!!error)
                     setLoading(false)
                 })
         }, debounceTimeout),
         [setData, setLoading]
     )
 
-    const handleCategorySearch = useCallback(
-        event => {
-            event.preventDefault()
-            const { id } = event.currentTarget.dataset || event.srcElement.dataset
-
-            setVisible(false)
-            executeSearch(
-                value,
-                history,
-                id
-            );
-        },
-        [executeSearch, history, setVisible, value]
-    )
-
-    const handleOnProductOpen = useCallback(
-        () => {
-            setVisible(false)
-        },
-        [setVisible]
-    )
-
     useEffect(() => {
-        setLoading(true)
-        runQuery(value)
+        if (visible && valid) {
+            setLoading(true)
+            runQuery(value)
+        } else if (!value) {
+            setData(null)
+            setLoading(false)
+        }
 
-        return runQuery.cancel
-    }, [value])
-
-    if (loading) {
-        return (
-            <div>
-                <div>
-                    {"loading"}
-                </div>
-            </div>
-        )
-    }
-
-    if (!data || !data.products.items.length) {
-        return (
-            <div>
-                <div>
-                    No results found, try a different search
-                </div>
-            </div>
-        )
-    }
-
-    const { filters, items } = data.products
-    const categoryFilter = filters.find(
-        filter => filter.name === 'Category'
-    )
-    const categorySuggestions = categoryFilter[
-        'filter_items'
-    ].slice(0, suggestedCategoriesLimit)
+        return () => {
+            runQuery.cancel()
+        }
+    }, [valid, value, visible])
 
     return (
-        <div>
-            <SuggestedCategories
-                handleCategorySearch={handleCategorySearch}
-                autocompleteQuery={value}
-                categorySuggestions={categorySuggestions}
-            />
-            <SuggestedProducts
-                handleOnProductOpen={handleOnProductOpen}
-                items={mapProducts(
-                    items.slice(0, suggestedProductsLimit)
-                )}
-            />
+        <div className={classes.root}>
+            <div className={classes.message}>
+                {message || `${data.products.items.length} items`}
+            </div>
+            <div className={classes.suggestions}>
+                <Suggestions
+                    products={data ? data.products : {}}
+                    searchValue={value}
+                    visible={visible}
+                />
+            </div>
         </div>
-    )
-}
-
-const Autocomplete = props => {
-    const { executeSearch, history, setVisible, visible } = props
-    const { value } = useFieldState("search_query")
-    const valid = value && value.length > 2
-
-    if (!visible || !valid) {
-        return null
-    }
-
-    return (
-        <Suggestions
-            executeSearch={executeSearch}
-            history={history}
-            setVisible={setVisible}
-            value={value}
-        />
     )
 }
 
