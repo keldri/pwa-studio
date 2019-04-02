@@ -1,12 +1,12 @@
 import React, { useCallback } from "react"
-import { useFieldState } from "informed"
+import { useFieldState, useFormApi } from "informed"
 import ClearIcon from "react-feather/dist/icons/x"
 import SearchIcon from "react-feather/dist/icons/search"
 
 import Icon from "src/components/Icon"
 import TextInput from "src/components/TextInput"
 import Trigger from "src/components/Trigger"
-import useSearchField from "./useSearchField"
+import useValueFromQuery from "./useValueFromQuery"
 
 const clearIcon = <Icon src={ClearIcon} size={18} />
 const searchIcon = <Icon src={SearchIcon} size={18} />
@@ -14,7 +14,24 @@ const searchIcon = <Icon src={SearchIcon} size={18} />
 const SearchField = props => {
     const { location, onChange, onFocus } = props
     const { value } = useFieldState("search_query")
-    const { formApi } = useSearchField({ location, onChange })
+    const formApi = useFormApi()
+
+    const setValue = useCallback(
+        queryValue => {
+            // update search field
+            if (queryValue) {
+                formApi.setValue("search_query", queryValue)
+            }
+
+            // trigger the effects of clearing the field
+            if (typeof onChange === "function") {
+                onChange("")
+            }
+        },
+        [formApi, onChange]
+    )
+
+    useValueFromQuery({ location, setValue })
 
     const resetForm = useCallback(
         () => {
